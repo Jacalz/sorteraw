@@ -3,4 +3,11 @@ name = "sorteraw"
 version = "0.1.0"
 edition = "2024"
 
+[profile.release]
+strip = true
+lto = true
+panic = "abort"
+
 [dependencies]
+anyhow = "1.0.99"
+clap = { version = "4.5.47", features = ["derive"] }
