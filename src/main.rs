@@ -8,8 +8,14 @@ use time::{OffsetDateTime, format_description};
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Args {
+    /// Source directory to look for files to sort.
     src: PathBuf,
+    /// Destination directory where folders will be created.
     dst: PathBuf,
+
+    /// Move files instead of copying them.
+    #[arg(short, long)]
+    move_files: bool,
 }
 
 fn main() -> Result<()> {
@@ -20,17 +26,23 @@ fn main() -> Result<()> {
 
     for entry in fs::read_dir(&args.src)? {
         let entry = entry?;
-        let path = entry.path();
 
         let time: OffsetDateTime = entry.metadata()?.modified()?.into();
         let dir = args.dst.join(time.format(&date_format)?);
-        let new_location = dir.join(path.file_name().expect("file name not found"));
+
+        let old_path = entry.path();
+        let new_path = dir.join(old_path.file_name().expect("file name not found"));
+
         if !seen_dirs.contains(&dir) {
             fs::create_dir(&dir)?;
             seen_dirs.insert(dir);
         }
 
-        fs::copy(&path, &new_location)?;
+        if args.move_files {
+            fs::rename(&old_path, &new_path)?;
+        } else {
+            fs::copy(&old_path, &new_path)?;
+        }
     }
     Ok(())
 }
