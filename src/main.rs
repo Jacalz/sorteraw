@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use clap::Parser;
 use std::collections::HashSet;
 use std::fs;
@@ -18,8 +18,21 @@ struct Args {
     move_files: bool,
 }
 
+fn validate_args(args: &Args) -> Result<()> {
+    if !args.src.exists() {
+        return Err(anyhow!("Source directory does not exist"));
+    }
+
+    if !args.dst.exists() {
+        fs::create_dir_all(&args.dst)?;
+    }
+
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let args = Args::parse();
+    validate_args(&args)?;
 
     let date_format = format_description::parse("[year]-[month]-[day]")?;
     let mut seen_dirs = HashSet::new();
