@@ -45,6 +45,9 @@ fn main() -> Result<()> {
 
         let old_path = entry.path();
         let new_path = dir.join(old_path.file_name().expect("file name not found"));
+        if new_path.exists() {
+            return Err(anyhow!("File {:?} already exists at destination", new_path));
+        }
 
         if !seen_dirs.contains(&dir) {
             fs::create_dir(&dir)?;
