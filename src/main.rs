@@ -4,7 +4,10 @@ use std::collections::HashSet;
 use std::fs;
 use std::fs::DirEntry;
 use std::path::PathBuf;
-use time::{OffsetDateTime, format_description};
+use time::{OffsetDateTime, macros::format_description};
+
+const DATE_FORMAT: &[time::format_description::FormatItem<'_>] =
+    format_description!("[year]-[month]-[day]");
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -23,11 +26,9 @@ fn main() -> Result<()> {
     let args = Args::parse();
     validate_args(&args)?;
 
-    let date_format = format_description::parse("[year]-[month]-[day]")?;
     let mut seen_dirs = HashSet::new();
-
     for entry in fs::read_dir(&args.src)? {
-        sort_file_into_place(&args, &date_format, &mut seen_dirs, entry?)?;
+        sort_file_into_place(&args, &mut seen_dirs, &entry?)?;
     }
 
     Ok(())
@@ -47,12 +48,11 @@ fn validate_args(args: &Args) -> Result<()> {
 
 fn sort_file_into_place(
     args: &Args,
-    date_format: &Vec<format_description::BorrowedFormatItem<'_>>,
     seen_dirs: &mut HashSet<PathBuf>,
-    entry: DirEntry,
+    entry: &DirEntry,
 ) -> Result<()> {
     let time: OffsetDateTime = entry.metadata()?.modified()?.into();
-    let dir = args.dst.join(time.format(date_format)?);
+    let dir = args.dst.join(time.format(DATE_FORMAT)?);
 
     let old_path = entry.path();
     let new_path = dir.join(old_path.file_name().expect("file name not found"));
