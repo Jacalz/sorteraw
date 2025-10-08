@@ -24,23 +24,20 @@ struct Args {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    validate_args(&args)?;
-
-    let mut seen_dirs = HashSet::new();
-    for entry in fs::read_dir(&args.src)? {
-        sort_file_into_place(&args, &mut seen_dirs, &entry?)?;
-    }
-
-    Ok(())
-}
-
-fn validate_args(args: &Args) -> Result<()> {
     if !args.src.exists() {
         return Err(anyhow!("Source directory does not exist"));
     }
-
     if !args.dst.exists() {
         fs::create_dir_all(&args.dst)?;
+    }
+
+    run_sorting(&args)
+}
+
+fn run_sorting(args: &Args) -> Result<()> {
+    let mut seen_dirs = HashSet::new();
+    for entry in fs::read_dir(&args.src)? {
+        sort_file_into_place(&args, &mut seen_dirs, &entry?)?;
     }
 
     Ok(())
@@ -51,11 +48,11 @@ fn sort_file_into_place(
     seen_dirs: &mut HashSet<PathBuf>,
     entry: &DirEntry,
 ) -> Result<()> {
-    let time: OffsetDateTime = entry.metadata()?.modified()?.into();
+    let time = OffsetDateTime::from(entry.metadata()?.modified()?);
     let dir = args.dst.join(time.format(DATE_FORMAT)?);
 
     let old_path = entry.path();
-    let new_path = dir.join(old_path.file_name().expect("file name not found"));
+    let new_path = dir.join(old_path.file_name().unwrap());
     if new_path.exists() {
         return Err(anyhow!("File {:?} already exists at destination", new_path));
     }
