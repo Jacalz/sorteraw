@@ -52,6 +52,10 @@ fn sort_file_into_place(
     let dir = args.dst.join(time.format(DATE_FORMAT)?);
 
     let old_path = entry.path();
+    if old_path.is_dir() {
+        return Ok(());
+    }
+
     let new_path = dir.join(old_path.file_name().unwrap());
     if new_path.exists() {
         return Err(anyhow!("File {:?} already exists at destination", new_path));
