@@ -32,65 +32,80 @@ fn main() -> Result<()> {
         fs::create_dir_all(&args.dst)?;
     }
 
-    collect_files(&args)?
-        .par_iter()
-        .try_for_each(|(old, new)| -> Result<()> { move_into_place(&args, old, new) })?;
-
-    Ok(())
+    let sorter = Sorter::new(args);
+    let files = sorter.create_and_collect()?;
+    sorter.sort(&files)
 }
 
-fn collect_files(args: &Args) -> Result<Vec<(PathBuf, PathBuf)>> {
-    let seen_dirs = DashSet::new();
-    let files = fs::read_dir(&args.src)?
-        .par_bridge()
-        .try_fold(
-            Vec::new,
-            |mut acc, entry| -> Result<Vec<(PathBuf, PathBuf)>> {
-                if let Some((old, new)) = create_directory_if_needed(args, &entry?, &seen_dirs)? {
-                    acc.push((old, new));
-                }
-                Ok(acc)
-            },
-        )
-        .try_reduce(Vec::new, |mut acc1, mut acc2| {
-            acc1.append(&mut acc2);
-            Ok(acc1)
-        })?;
-
-    Ok(files)
+struct Sorter {
+    args: Args,
+    seen_dirs: DashSet<PathBuf>,
 }
 
-fn create_directory_if_needed(
-    args: &Args,
-    entry: &DirEntry,
-    seen_dirs: &DashSet<PathBuf>,
-) -> Result<Option<(PathBuf, PathBuf)>> {
-    let time = OffsetDateTime::from(entry.metadata()?.modified()?);
-    let dir = args.dst.join(time.format(DATE_FORMAT)?);
-
-    let old_path = entry.path();
-    if old_path.is_dir() {
-        return Ok(None);
+impl Sorter {
+    fn new(args: Args) -> Self {
+        Sorter {
+            args,
+            seen_dirs: DashSet::new(),
+        }
     }
-
-    let new_path = dir.join(old_path.file_name().unwrap());
-    if new_path.exists() {
-        return Err(anyhow!("File {:?} already exists at destination", new_path));
-    }
-
-    if seen_dirs.insert(dir.clone()) {
-        fs::create_dir(dir)?;
-    }
-
-    Ok(Some((old_path, new_path)))
 }
 
-fn move_into_place(args: &Args, old_path: &PathBuf, new_path: &PathBuf) -> Result<()> {
-    if args.move_files {
-        fs::rename(old_path, new_path)?;
-    } else {
-        fs::copy(old_path, new_path)?;
+impl Sorter {
+    fn create_and_collect(&self) -> Result<Vec<(PathBuf, PathBuf)>> {
+        let files = fs::read_dir(&self.args.src)?
+            .par_bridge()
+            .try_fold(
+                Vec::new,
+                |mut acc, entry| -> Result<Vec<(PathBuf, PathBuf)>> {
+                    if let Some((old, new)) = self.create_directory_if_needed(&entry?)? {
+                        acc.push((old, new));
+                    }
+                    Ok(acc)
+                },
+            )
+            .try_reduce(Vec::new, |mut acc1, mut acc2| {
+                acc1.append(&mut acc2);
+                Ok(acc1)
+            })?;
+
+        Ok(files)
     }
 
-    Ok(())
+    fn create_directory_if_needed(&self, entry: &DirEntry) -> Result<Option<(PathBuf, PathBuf)>> {
+        let time = OffsetDateTime::from(entry.metadata()?.modified()?);
+        let dir = self.args.dst.join(time.format(DATE_FORMAT)?);
+
+        let old_path = entry.path();
+        if old_path.is_dir() {
+            return Ok(None);
+        }
+
+        let new_path = dir.join(old_path.file_name().unwrap());
+        if new_path.exists() {
+            return Err(anyhow!("File {:?} already exists at destination", new_path));
+        }
+
+        if self.seen_dirs.insert(dir.clone()) {
+            fs::create_dir(dir)?;
+        }
+
+        Ok(Some((old_path, new_path)))
+    }
+
+    fn sort(&self, files: &Vec<(PathBuf, PathBuf)>) -> Result<()> {
+        files
+            .par_iter()
+            .try_for_each(|(old_path, new_path)| self.move_into_place(old_path, new_path))
+    }
+
+    fn move_into_place(&self, old_path: &PathBuf, new_path: &PathBuf) -> Result<()> {
+        if self.args.move_files {
+            fs::rename(old_path, new_path)?;
+        } else {
+            fs::copy(old_path, new_path)?;
+        }
+
+        Ok(())
+    }
 }
