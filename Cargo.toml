@@ -11,4 +11,6 @@ panic = "abort"
 [dependencies]
 anyhow = "1.0.99"
 clap = { version = "4.5.47", features = ["derive"] }
+dashmap = "6.1.0"
+rayon = "1.11.0"
 time = { version = "0.3.43", features = ["formatting", "macros"] }

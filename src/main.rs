@@ -1,7 +1,7 @@
 use anyhow::{Result, anyhow};
 use clap::Parser;
-//use rayon::prelude::*;
-use std::collections::HashSet;
+use dashmap::DashSet;
+use rayon::prelude::*;
 use std::fs;
 use std::fs::DirEntry;
 use std::path::PathBuf;
@@ -33,23 +33,28 @@ fn main() -> Result<()> {
     }
 
     collect_files(&args)?
-        .iter()
+        .par_iter()
         .try_for_each(|(old, new)| -> Result<()> { move_into_place(&args, old, new) })?;
 
     Ok(())
 }
 
 fn collect_files(args: &Args) -> Result<Vec<(PathBuf, PathBuf)>> {
-    let mut files = Vec::new();
-
-    let mut seen_dirs = HashSet::new();
-    fs::read_dir(&args.src)?
-        .into_iter()
-        .try_for_each(|entry| -> Result<()> {
-            if let Some((old, new)) = create_directory_if_needed(args, &entry?, &mut seen_dirs)? {
-                files.push((old, new));
-            }
-            Ok(())
+    let seen_dirs = DashSet::new();
+    let files = fs::read_dir(&args.src)?
+        .par_bridge()
+        .try_fold(
+            Vec::new,
+            |mut acc, entry| -> Result<Vec<(PathBuf, PathBuf)>> {
+                if let Some((old, new)) = create_directory_if_needed(args, &entry?, &seen_dirs)? {
+                    acc.push((old, new));
+                }
+                Ok(acc)
+            },
+        )
+        .try_reduce(Vec::new, |mut acc1, mut acc2| {
+            acc1.append(&mut acc2);
+            Ok(acc1)
         })?;
 
     Ok(files)
@@ -58,7 +63,7 @@ fn collect_files(args: &Args) -> Result<Vec<(PathBuf, PathBuf)>> {
 fn create_directory_if_needed(
     args: &Args,
     entry: &DirEntry,
-    seen_dirs: &mut HashSet<PathBuf>,
+    seen_dirs: &DashSet<PathBuf>,
 ) -> Result<Option<(PathBuf, PathBuf)>> {
     let time = OffsetDateTime::from(entry.metadata()?.modified()?);
     let dir = args.dst.join(time.format(DATE_FORMAT)?);
@@ -73,9 +78,8 @@ fn create_directory_if_needed(
         return Err(anyhow!("File {:?} already exists at destination", new_path));
     }
 
-    if !seen_dirs.contains(&dir) {
-        fs::create_dir(&dir)?;
-        seen_dirs.insert(dir);
+    if seen_dirs.insert(dir.clone()) {
+        fs::create_dir(dir)?;
     }
 
     Ok(Some((old_path, new_path)))
@@ -83,9 +87,9 @@ fn create_directory_if_needed(
 
 fn move_into_place(args: &Args, old_path: &PathBuf, new_path: &PathBuf) -> Result<()> {
     if args.move_files {
-        fs::rename(&old_path, &new_path)?;
+        fs::rename(old_path, new_path)?;
     } else {
-        fs::copy(&old_path, &new_path)?;
+        fs::copy(old_path, new_path)?;
     }
 
     Ok(())
