@@ -1,7 +1,7 @@
 use anyhow::{Result, anyhow};
 use clap::Parser;
-use dashmap::DashSet;
 use rayon::prelude::*;
+use std::collections::HashSet;
 use std::fs;
 use std::fs::DirEntry;
 use std::path::PathBuf;
@@ -32,47 +32,46 @@ fn main() -> Result<()> {
         fs::create_dir_all(&args.dst)?;
     }
 
-    let sorter = Sorter::new(args);
-    let files = sorter.create_and_collect()?;
-    sorter.sort(&files)
+    Sorter::new(args).sort()
 }
 
 struct Sorter {
     args: Args,
-    seen_dirs: DashSet<PathBuf>,
+    seen_dirs: HashSet<PathBuf>,
 }
 
 impl Sorter {
     fn new(args: Args) -> Self {
         Sorter {
             args,
-            seen_dirs: DashSet::new(),
+            seen_dirs: HashSet::new(),
         }
     }
 }
 
 impl Sorter {
-    fn create_and_collect(&self) -> Result<Vec<(PathBuf, PathBuf)>> {
+    fn sort(&mut self) -> Result<()> {
         let files = fs::read_dir(&self.args.src)?
-            .par_bridge()
-            .try_fold(
-                Vec::new,
-                |mut acc, entry| -> Result<Vec<(PathBuf, PathBuf)>> {
-                    if let Some((old, new)) = self.create_directory_if_needed(&entry?)? {
-                        acc.push((old, new));
-                    }
-                    Ok(acc)
-                },
-            )
-            .try_reduce(Vec::new, |mut acc1, mut acc2| {
-                acc1.append(&mut acc2);
-                Ok(acc1)
-            })?;
+            .into_iter()
+            .map(|entry| -> Result<Option<(PathBuf, PathBuf)>> {
+                self.create_directory_if_needed(&entry?)
+            })
+            .collect::<Result<Vec<_>>>()?;
 
-        Ok(files)
+        files.par_iter().try_for_each(|pair| -> Result<()> {
+            if let Some((old_path, new_path)) = pair {
+                self.move_into_place(old_path, new_path)?;
+            }
+            Ok(())
+        })?;
+
+        Ok(())
     }
 
-    fn create_directory_if_needed(&self, entry: &DirEntry) -> Result<Option<(PathBuf, PathBuf)>> {
+    fn create_directory_if_needed(
+        &mut self,
+        entry: &DirEntry,
+    ) -> Result<Option<(PathBuf, PathBuf)>> {
         let time = OffsetDateTime::from(entry.metadata()?.modified()?);
         let dir = self.args.dst.join(time.format(DATE_FORMAT)?);
 
@@ -86,17 +85,12 @@ impl Sorter {
             return Err(anyhow!("File {:?} already exists at destination", new_path));
         }
 
-        if self.seen_dirs.insert(dir.clone()) {
-            fs::create_dir(dir)?;
+        if !self.seen_dirs.contains(&dir) {
+            fs::create_dir(&dir)?;
+            self.seen_dirs.insert(dir);
         }
 
         Ok(Some((old_path, new_path)))
-    }
-
-    fn sort(&self, files: &Vec<(PathBuf, PathBuf)>) -> Result<()> {
-        files
-            .par_iter()
-            .try_for_each(|(old_path, new_path)| self.move_into_place(old_path, new_path))
     }
 
     fn move_into_place(&self, old_path: &PathBuf, new_path: &PathBuf) -> Result<()> {
