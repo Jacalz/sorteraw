@@ -52,7 +52,6 @@ impl Sorter {
 impl Sorter {
     fn run(&mut self) -> Result<()> {
         let files = fs::read_dir(&self.args.src)?
-            .into_iter()
             .map(|entry| -> Result<Option<(PathBuf, PathBuf)>> {
                 self.init_directory_and_paths(&entry?)
             })
