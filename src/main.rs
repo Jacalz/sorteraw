@@ -1,6 +1,6 @@
 use anyhow::{Result, anyhow};
 use clap::Parser;
-use rayon::prelude::*;
+use rayon::{ThreadPoolBuilder, prelude::*};
 use std::collections::HashSet;
 use std::fs;
 use std::fs::DirEntry;
@@ -32,7 +32,7 @@ fn main() -> Result<()> {
         fs::create_dir_all(&args.dst)?;
     }
 
-    Sorter::new(args).sort()
+    Sorter::new(args).run()
 }
 
 struct Sorter {
@@ -50,28 +50,20 @@ impl Sorter {
 }
 
 impl Sorter {
-    fn sort(&mut self) -> Result<()> {
+    fn run(&mut self) -> Result<()> {
         let files = fs::read_dir(&self.args.src)?
             .into_iter()
             .map(|entry| -> Result<Option<(PathBuf, PathBuf)>> {
-                self.create_directory_if_needed(&entry?)
+                self.init_directory_and_paths(&entry?)
             })
             .collect::<Result<Vec<_>>>()?;
 
-        files.par_iter().try_for_each(|pair| -> Result<()> {
-            if let Some((old_path, new_path)) = pair {
-                self.move_into_place(old_path, new_path)?;
-            }
-            Ok(())
-        })?;
-
-        Ok(())
+        ThreadPoolBuilder::new()
+            .build()?
+            .install(|| -> Result<()> { self.sort(&files) })
     }
 
-    fn create_directory_if_needed(
-        &mut self,
-        entry: &DirEntry,
-    ) -> Result<Option<(PathBuf, PathBuf)>> {
+    fn init_directory_and_paths(&mut self, entry: &DirEntry) -> Result<Option<(PathBuf, PathBuf)>> {
         let time = OffsetDateTime::from(entry.metadata()?.modified()?);
         let dir = self.args.dst.join(time.format(DATE_FORMAT)?);
 
@@ -91,6 +83,15 @@ impl Sorter {
         }
 
         Ok(Some((old_path, new_path)))
+    }
+
+    fn sort(&self, files: &Vec<Option<(PathBuf, PathBuf)>>) -> Result<()> {
+        files.par_iter().try_for_each(|pair| -> Result<()> {
+            if let Some((old_path, new_path)) = pair {
+                self.move_into_place(old_path, new_path)?;
+            }
+            Ok(())
+        })
     }
 
     fn move_into_place(&self, old_path: &PathBuf, new_path: &PathBuf) -> Result<()> {
