@@ -85,21 +85,22 @@ impl Sorter {
     }
 
     fn sort(&self, files: &Vec<Option<(PathBuf, PathBuf)>>) -> Result<()> {
+        let move_or_copy: fn((&PathBuf, &PathBuf)) -> Result<()> = match self.args.move_files {
+            true => |(old_path, new_path)| {
+                fs::rename(old_path, new_path)?;
+                Ok(())
+            },
+            false => |(old_path, new_path)| {
+                fs::copy(old_path, new_path)?;
+                Ok(())
+            },
+        };
+
         files.par_iter().try_for_each(|pair| -> Result<()> {
             if let Some((old_path, new_path)) = pair {
-                self.move_into_place(old_path, new_path)?;
+                move_or_copy((old_path, new_path))?;
             }
             Ok(())
         })
-    }
-
-    fn move_into_place(&self, old_path: &PathBuf, new_path: &PathBuf) -> Result<()> {
-        if self.args.move_files {
-            fs::rename(old_path, new_path)?;
-        } else {
-            fs::copy(old_path, new_path)?;
-        }
-
-        Ok(())
     }
 }
